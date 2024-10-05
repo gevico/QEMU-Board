@@ -1,0 +1,65 @@
+# !/bin/bash
+
+TEST_NUM=3
+TIMEOUT=30
+LOG_FILE="run.log"
+TEST_CNT=0
+
+if [ -z "${QEMU_PATH}" ]; then
+    echo "Error: The environment variable QEMU_PATH is not set or is empty!"
+    exit 1
+fi
+
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+
+function run_testcase {
+    local testcase_name=$1
+    local testcase_prompt=$2
+    local testcase_path=$3
+
+    let TEST_CNT=TEST_CNT+1
+    echo "    Start $TEST_CNT: $testcase_name"
+    QEMU_PID=$(${QEMU_PATH}/qemu-system-aarch64 \
+        -M xilinx-zynq-a9 \
+        -serial /dev/null \
+        -serial mon:stdio \
+        -display none \
+        -kernel $testcase_path/uImage \
+        -dtb $testcase_path/devicetree.dtb \
+        --initrd $testcase_path/uramdisk.image.gz \
+        > $LOG_FILE \
+        & echo $!)
+
+    counter=0
+    while true; do
+        LAST_LINE=$(tail -n 1 "$LOG_FILE")
+
+        if echo "$LAST_LINE" | grep -q "$testcase_prompt"; then
+            echo "$TEST_CNT/$TEST_NUM Test #$TEST_CNT: $testcase_name ......................   Passed"
+            kill -9 $QEMU_PID
+            rm -rf $LOG_FILE
+            return 0
+        else
+            let counter=counter+1
+        fi
+
+        # 检查是否超时
+        if [ $counter -ge $TIMEOUT ]; then
+            echo "    Check $testcase_name timeout $TIMEOUT s! (Failed)"
+            kill -9 $QEMU_PID
+            rm -rf $LOG_FILE
+            exit 1
+        fi
+
+        sleep 1
+    done
+}
+
+echo "Test Project: ${SCRIPT_DIR}/hw/arm/xilinx-zynq"
+run_testcase "xilinx-zynq.zc702" "zc702-zynq7 login:"  "${SCRIPT_DIR}/hw/arm/xilinx-zynq/zc702"
+run_testcase "xilinx-zynq.zc706" "zc706-zynq7 login:"  "${SCRIPT_DIR}/hw/arm/xilinx-zynq/zc706"
+run_testcase "xilinx-zynq.zed  " "zedboard-zynq7 login:" "${SCRIPT_DIR}/hw/arm/xilinx-zynq/zed"
+
+echo ""
+echo "All tests passed"
+exit 0
